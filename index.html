@@ -124,6 +124,7 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
       <button class="go" id="lv1">Level 1</button>
       <button class="go" id="lv2">Level 2</button>
       <button class="go" id="lv3">Boss!</button>
+      <button class="go" id="lv4">Level 4</button>
     </div>
     <p class="keys">← → laufen · Leertaste springen · ↑ ↓ Leiter klettern · ↑ an der Sterntür · X schießen (Boss-Level)</p>
   </div>
@@ -182,6 +183,35 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
       boss: { x: 1050, min: 470, max: 1300 },
       cage: { x: 1370 },
       ladders: [], stars: [], enemies: [], lava: [], spikes: [], doors: []
+    },
+    4: {
+      name: 'Level 4', width: 2700, start: 60,
+      ground: [[0,330],[345,330],[345,180],[450,180],[450,330],          // Säule (nur über die Leiter)
+               [700,330],[700,700],[830,700],[830,330],                   // Abgrund
+               [1500,330],[1500,430],[1640,430],[1640,330],               // Loch mit Stacheln
+               [2150,330],[2150,430],[2290,430],[2290,330],[2700,332]],   // Lava
+      ladders: [{ x: 300, w: 40, top: 157, bottom: 330 }],
+      stars: [[397,135,1],[560,300,1],[2600,250,1.7]],
+      saws: [{ x: 560, y0: 140, y1: 300, r: 20, period: 2.6 }],
+      enemies: [
+        { type: 'dino', x: 1150, min: 1000, max: 1420 },
+        { type: 'spiky', x: 1800, min: 1700, max: 2040 }
+      ],
+      lava: [{ x0: 1500, x1: 1640, y: 410, respawn: 1455, kind: 'spike' },
+             { x0: 2150, x1: 2290, y: 355, respawn: 2090 }],
+      checkpoints: [60, 600, 900, 1455, 1680, 2090],
+      spikes: [],
+      doors: [{ x: 900, to: 'bonus2' }]
+    },
+    bonus2: {
+      name: 'Bonus-Raum', width: 900, start: 40, bonus: true,
+      ground: [[0,360],[120,360],[200,300],[280,360],[360,300],[440,360],[520,300],[600,360],[680,280],[760,360],[900,360]],
+      ladders: [],
+      stars: [[70,335,.7,'b'],[200,262,.7,'b'],[280,320,.7,'b'],[360,262,.7,'b'],[440,320,.7,'b'],[520,262,.7,'b'],
+              [600,320,.7,'b'],[760,320,.7,'b'],[800,335,.7,'b'],[160,225,.7,'b'],[400,225,.7,'b'],[560,225,.7,'b'],
+              [680,195,1,'h']],
+      enemies: [], lava: [], spikes: [],
+      doors: [{ x: 840, to: 'back' }]
     },
     bonus: {
       name: 'Bonus-Raum', width: 900, start: 40, bonus: true,
@@ -267,8 +297,10 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
   let p = null, fx = [], hearts = 3, cam = 0, time = 0, boil = 0, bonusCount = 0, banner = null;
   const input = { left: false, right: false, up: false, down: false, jumpHeld: false, jumpBuf: 0, fireBuf: 0 };
 
-  const SIZES = { cat: [36, 34], pig: [50, 30], po: [44, 30], gun: [26, 48] };
-  const SPEEDS = { cat: 55, pig: 75, po: 45, gun: 35 };
+  const SIZES = { cat: [36, 34], pig: [50, 30], po: [44, 30], gun: [26, 48], dino: [56, 44], spiky: [44, 40] };
+  const SPEEDS = { cat: 55, pig: 75, po: 45, gun: 35, dino: 60, spiky: 40 };
+  const HP = { gun: 2, dino: 2, spiky: 3 };
+  const spikesUp = e => (e.cyc % 3.2) < 1.6;
 
   function makeWorld(def) {
     return {
@@ -276,12 +308,12 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
       stars: def.stars.map(([x, y, s, kind]) => ({ x, y, s, kind: kind || 'm', got: false })),
       enemies: def.enemies.map(d => {
         const [w, h] = SIZES[d.type];
-        return { ...d, w, h, y: 0, vx: d.type === 'gun' ? -SPEEDS.gun : SPEEDS[d.type], face: -1, hp: d.type === 'gun' ? 2 : 1,
+        return { ...d, w, h, y: 0, vx: d.type === 'gun' ? -SPEEDS.gun : SPEEDS[d.type], face: -1, hp: HP[d.type] || 1, maxHp: HP[d.type] || 1, cyc: 1.7,
                  dead: 0, alive: true, hitT: 0, shootT: 1.2, fartT: 1.5 + Math.random() * 2 };
       }),
       bullets: [],
       doorsUsed: def.doors.map(() => false),
-      outlines: buildOutline(def),
+      outlines: buildOutline(def), sawY: (def.saws || []).map(w => w.y0),
       pshots: [], balls: [], key: null, hasKey: false, cageOpen: false, friendT: 0, shake: 0,
       boss: def.boss ? { x: def.boss.x, y: 0, w: 84, h: 150, vx: 0, vy: 0, hp: 4, inv: 0, t: 2.2, mode: 'walk', face: -1,
                          onGround: true, dead: 0, alive: true, roar: 0, min: def.boss.min, max: def.boss.max } : null
@@ -356,8 +388,9 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
   function enterBonus(doorIndex) {
     mainWorld.doorsUsed[doorIndex] = true;
     returnX = mainWorld.def.doors[doorIndex].x + 10;
-    world = makeWorld(LEVELS.bonus);
-    placePlayer(LEVELS.bonus.start); cam = 0;
+    const target = LEVELS[mainWorld.def.doors[doorIndex].to];
+    world = makeWorld(target);
+    placePlayer(target.start); cam = 0;
     banner = { text: 'BONUS!', t: 1.6 };
     sDoor();
   }
@@ -387,7 +420,7 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
       const box = { x: d.x, y: G(d.x + 22) - 64, w: 44, h: 64 };
       if (overlap(p, box) && input.jumpBuf > 0) {
         input.jumpBuf = 0;
-        if (d.to === 'bonus') enterBonus(i); else leaveBonus();
+        if (d.to !== 'back') enterBonus(i); else leaveBonus();
         return;
       }
     }
@@ -442,13 +475,25 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
     for (const lv of def.lava) {
       const cx = p.x + p.w / 2;
       if (cx > lv.x0 && cx < lv.x1 && p.y + p.h > lv.y + 6) {
-        sLava();
-        for (let i = 0; i < 12; i++) fx.push({ x: cx, y: lv.y, vx: (Math.random() - .5) * 200, vy: -100 - Math.random() * 200, c: C.lava, t: 0 });
+        if (lv.kind !== 'spike') sLava();
+        for (let i = 0; i < 12; i++) fx.push({ x: cx, y: lv.y, vx: (Math.random() - .5) * 200, vy: -100 - Math.random() * 200, c: lv.kind === 'spike' ? C.graphite : C.lava, t: 0 });
         respawnAt(lv.respawn);
         return;
       }
     }
-    if (p.y > H + 60) { respawnAt(def.start); return; }
+    if (p.y > H + 60) {
+      const cps = (def.checkpoints || [def.start]).filter(c => c <= p.x);
+      respawnAt(cps.length ? Math.max(...cps) : def.start); return;
+    }
+
+    // Säge
+    (def.saws || []).forEach((w, i) => {
+      const y = (w.y0 + w.y1) / 2 - (w.y1 - w.y0) / 2 * Math.cos(time * 2 * Math.PI / w.period);
+      world.sawY[i] = y;
+      const nx = Math.max(p.x, Math.min(w.x, p.x + p.w)), ny = Math.max(p.y, Math.min(y, p.y + p.h));
+      if (Math.hypot(w.x - nx, y - ny) < w.r - 3) hurt(w.x);
+    });
+    if (state !== 'play') return;
 
     // Stacheln
     for (const s of def.spikes) {
@@ -479,6 +524,7 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
       if (!e.alive) continue;
       if (e.dead > 0) { e.dead -= dt; if (e.dead <= 0) e.alive = false; continue; }
       if (e.hitT > 0) e.hitT -= dt;
+      e.cyc += dt;
 
       if (e.type === 'gun') {
         const dx = pcx - (e.x + e.w / 2);
@@ -513,7 +559,10 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
       if (e.hitT > 0) continue;
       const box = { x: e.x + 4, y: e.y + 4, w: e.w - 8, h: e.h - 4 };
       if (overlap(p, box)) {
-        if (p.vy > 0 && prevBottom <= e.y + 14) {
+        if (p.vy > 0 && prevBottom <= e.y + 14 && e.type === 'spiky' && spikesUp(e)) {
+          hurt(e.x + e.w / 2); p.vy = -480;
+        } else if (p.vy > 0 && prevBottom <= e.y + 14) {
+          if (e.type === 'dino') e.vx *= 1.6;
           e.hp--; p.vy = input.jumpHeld ? -600 : -420; sStomp();
           for (let i = 0; i < 10; i++) {
             const a = Math.random() * 3.14 + 3.14, sp = 60 + Math.random() * 120;
@@ -865,6 +914,73 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
     ctx.restore();
   }
 
+  function drawDino(e, cx, f) {
+    if (e.hitT > 0 && Math.floor(e.hitT * 14) % 2 === 0) return;
+    const b = e.y + e.h, st = Math.sin(time * (e.hp < e.maxHp ? 16 : 10)) * 5;
+    ctx.save(); ctx.translate(cx, b); ctx.scale(f || 1, 1);
+    pencil(C.red, 3);
+    ctx.fillStyle = 'rgba(217,58,58,.08)';
+    ctx.beginPath(); ctx.ellipse(-2, -20, 19, 12, 0, 0, 6.29); ctx.fill(); ctx.stroke();       // Bauch
+    ctx.beginPath(); ctx.moveTo(-19, -22); ctx.quadraticCurveTo(-32, -22, -38, -10); ctx.stroke();  // Schwanz
+    ctx.beginPath(); ctx.moveTo(12, -28); ctx.lineTo(18, -38); ctx.stroke();                     // Hals
+    ctx.beginPath(); ctx.ellipse(24, -42, 11, 8, -.15, 0, 6.29); ctx.fillStyle = C.paper; ctx.fill(); ctx.stroke(); // Kopf
+    ctx.fillStyle = C.red; ctx.beginPath(); ctx.arc(26, -45, 1.8, 0, 6.29); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(21, -50); ctx.lineTo(29, -47); ctx.stroke();                     // böse Braue
+    ctx.beginPath(); ctx.moveTo(26, -38); ctx.lineTo(28, -35); ctx.lineTo(30, -38); ctx.lineTo(32, -35); ctx.stroke(); // Zähne
+    ctx.beginPath();                                                                              // Rückenzacken
+    for (let i = 0; i < 4; i++) { const x = -14 + i * 7; ctx.moveTo(x, -30); ctx.lineTo(x + 3, -37); ctx.lineTo(x + 6, -31); }
+    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-8, -10); ctx.lineTo(-9 + st, 0); ctx.moveTo(6, -10); ctx.lineTo(7 - st, 0); ctx.stroke(); // Beine
+    if (e.hp < e.maxHp) { ctx.beginPath(); ctx.moveTo(34, -54); ctx.lineTo(40, -60); ctx.moveTo(36, -50); ctx.lineTo(44, -52); ctx.stroke(); }
+    ctx.restore();
+  }
+
+  function drawSpiky(e, cx) {
+    if (e.hitT > 0 && Math.floor(e.hitT * 14) % 2 === 0) return;
+    const up = spikesUp(e), ph = e.cyc % 3.2, warn = !up && ph > 2.8;
+    const cy = e.y + e.h - 18, r = 15, sh = warn ? Math.sin(time * 50) * 1.5 : 0;
+    ctx.save(); ctx.translate(cx + sh, cy);
+    pencil(C.red, 3);
+    ctx.beginPath();
+    for (let i = 0; i < 12; i++) {
+      const a = Math.PI + i * Math.PI / 11, len = up ? 13 : 4;
+      ctx.moveTo(Math.cos(a - .12) * r, Math.sin(a - .12) * r);
+      ctx.lineTo(Math.cos(a) * (r + len), Math.sin(a) * (r + len));
+      ctx.lineTo(Math.cos(a + .12) * r, Math.sin(a + .12) * r);
+    }
+    ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, 6.29); ctx.fillStyle = C.paper; ctx.fill(); ctx.stroke();
+    const look = e.face || 1;
+    ctx.beginPath(); ctx.moveTo(-8 + look * 2, -6); ctx.lineTo(-2 + look * 2, -3); ctx.moveTo(8 + look * 2, -6); ctx.lineTo(2 + look * 2, -3); ctx.stroke();
+    ctx.fillStyle = C.red; ctx.beginPath(); ctx.arc(-4 + look * 2, 0, 1.8, 0, 6.29); ctx.arc(4 + look * 2, 0, 1.8, 0, 6.29); ctx.fill();
+    ctx.beginPath(); ctx.arc(look * 2, 9, 4, 3.6, 5.8); ctx.stroke();
+    const k = Math.sin(time * 12) * 3;
+    ctx.beginPath(); ctx.moveTo(-6, r - 1); ctx.lineTo(-8 + k, r + 4); ctx.moveTo(6, r - 1); ctx.lineTo(8 - k, r + 4); ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawSaw(w, i) {
+    const y = world.sawY[i] == null ? w.y0 : world.sawY[i];
+    ctx.save();
+    pencil(C.grey, 2); ctx.setLineDash([5, 6]);
+    ctx.beginPath(); ctx.moveTo(w.x, w.y0 - w.r - 10); ctx.lineTo(w.x, w.y1); ctx.stroke(); ctx.setLineDash([]);
+    pencil(C.graphite, 3); ctx.beginPath(); ctx.moveTo(w.x - 10, w.y0 - w.r - 10); ctx.lineTo(w.x + 10, w.y0 - w.r - 10); ctx.stroke();
+    ctx.translate(w.x, y); ctx.rotate(time * 9);
+    ctx.beginPath();
+    for (let k = 0; k < 24; k++) { const a = k * Math.PI / 12, rr = k % 2 ? w.r - 5 : w.r; ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); }
+    ctx.closePath(); ctx.fillStyle = 'rgba(185,187,192,.55)'; ctx.fill(); pencil(C.graphite, 2.5); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, 4, 0, 6.29); ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawPit(lv) {
+    if (lv.kind !== 'spike') return drawLava(lv);
+    const gy = G((lv.x0 + lv.x1) / 2), n = Math.floor((lv.x1 - lv.x0) / 14);
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) { const x = lv.x0 + 2 + i * 14; ctx.moveTo(x, gy); ctx.lineTo(x + 7, gy - 18); ctx.lineTo(x + 14, gy); }
+    ctx.fillStyle = 'rgba(94,95,99,.35)'; ctx.fill(); pencil(C.graphite, 2.5); ctx.stroke();
+  }
+
   function drawPo(e, cx) {
     const b = e.y + e.h, wob = Math.sin(time * 9) * .08;
     ctx.save(); ctx.translate(cx, b); ctx.rotate(wob);
@@ -909,7 +1025,15 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
     if (e.type === 'cat') drawCat(e, cx, look);
     else if (e.type === 'pig') drawPig(e, cx, look);
     else if (e.type === 'po') drawPo(e, cx);
+    else if (e.type === 'dino') drawDino(e, cx, look);
+    else if (e.type === 'spiky') drawSpiky(e, cx);
     else drawGun(e, cx);
+    if ((e.type === 'dino' || e.type === 'spiky') && !e.dead) {
+      for (let i = 0; i < e.hp; i++) {
+        heartPath(cx - (e.hp - 1) * 6 + i * 12, e.y - 22, 10);
+        ctx.fillStyle = 'rgba(217,58,58,.35)'; ctx.fill(); pencil(C.red, 1.5); ctx.stroke();
+      }
+    }
     ctx.restore();
   }
 
@@ -926,7 +1050,7 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
     pencil(C.graphite, 3); ctx.strokeRect(x, y, 44, 64);
     ctx.fillStyle = C.graphite; ctx.beginPath(); ctx.arc(x + 36, y + 36, 2.5, 0, 6.29); ctx.fill();
     const used = world.doorsUsed[i];
-    if (d.to === 'bonus') {
+    if (d.to !== 'back') {
       ctx.fillStyle = used ? 'rgba(185,187,192,.6)' : C.paper;
       starPath(x + 22, y + 22, 13); ctx.fill(); pencil(used ? C.grey : C.yellow, 3); ctx.stroke();
     } else {
@@ -936,7 +1060,7 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
     if (!used && overlap(p, { x: x - 10, y, w: 64, h: 64 })) {
       const by = y - 18 + Math.sin(time * 6) * 4;
       ctx.fillStyle = C.green; ctx.font = '22px ' + HAND; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(d.to === 'bonus' ? '▲ rein!' : '▲ raus', x + 22, by);
+      ctx.fillText(d.to !== 'back' ? '▲ rein!' : '▲ raus', x + 22, by);
     }
     ctx.restore();
   }
@@ -1053,8 +1177,9 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
     ctx.fillStyle = C.ground; ctx.fill();
     pencil(C.graphite, 3); ctx.stroke();
 
-    def.lava.forEach(drawLava);
+    def.lava.forEach(drawPit);
     def.spikes.forEach(drawSpikes);
+    (def.saws || []).forEach(drawSaw);
 
     for (const st of world.stars) if (!st.got) {
       const bob = Math.sin(time * 3 + st.x) * 4;
@@ -1134,6 +1259,7 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
   document.getElementById('lv1').addEventListener('click', () => startLevel(1));
   document.getElementById('lv2').addEventListener('click', () => startLevel(2));
   document.getElementById('lv3').addEventListener('click', () => startLevel(3));
+  document.getElementById('lv4').addEventListener('click', () => startLevel(4));
 
   // ================= Eingabe =================
   const KEY = { ArrowLeft: 'left', a: 'left', A: 'left', ArrowRight: 'right', d: 'right', D: 'right', ArrowUp: 'up', w: 'up', W: 'up', ArrowDown: 'down', s: 'down', S: 'down' };
