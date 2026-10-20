@@ -61,6 +61,10 @@ canvas { display: block; }
   background: rgba(252, 252, 250, 0.92);
 }
 .screen[hidden] { display: none; }
+.screen { z-index: 10; }
+#pad { z-index: 5; }
+#pad[hidden] { display: none !important; }
+button.go { touch-action: manipulation; -webkit-user-select: none; user-select: none; }
 .title {
   font-family: var(--title); font-weight: 700;
   font-size: clamp(40px, 8vw, 72px); line-height: 1; margin: 0;
@@ -105,7 +109,7 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
 <div id="wrap">
   <canvas id="c"></canvas>
 
-  <div id="pad">
+  <div id="pad" hidden>
     <div class="grp">
       <button id="bL" aria-label="Nach links">◀</button>
       <button id="bR" aria-label="Nach rechts">▶</button>
@@ -125,8 +129,9 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
       <button class="go" id="lv2">Level 2</button>
       <button class="go" id="lv3">Boss!</button>
       <button class="go" id="lv4">Level 4</button>
+      <button class="go" id="lv5">Boss 2!</button>
     </div>
-    <p class="keys">← → laufen · Leertaste springen · ↑ ↓ Leiter klettern · ↑ an der Sterntür · X schießen (Boss-Level)</p>
+    <p class="keys">← → laufen · Leertaste springen · ↑ ↓ Leiter klettern · ↑ an der Sterntür · X schießen/werfen (Boss-Level)</p>
   </div>
 
   <div class="screen" id="end" hidden>
@@ -141,7 +146,7 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
   const W = 800, H = 450;
   const canvas = document.getElementById('c');
   const ctx = canvas.getContext('2d');
-  const C = { paper: '#FCFCFA', bonusPaper: '#FFFBE6', ground: '#F1F2F4', graphite: '#5E5F63', green: '#2E9E3E', red: '#D93A3A', yellow: '#E0A800', grey: '#B9BBC0', lava: '#F28C28', lavaDark: '#D9620F' };
+  const C = { blue: '#4A90C8', paper: '#FCFCFA', bonusPaper: '#FFFBE6', ground: '#F1F2F4', graphite: '#5E5F63', green: '#2E9E3E', red: '#D93A3A', yellow: '#E0A800', grey: '#B9BBC0', lava: '#F28C28', lavaDark: '#D9620F' };
   const HAND = '"Patrick Hand", "Comic Sans MS", cursive';
   const GRAV = 1800, JUMP = -690, SPEED = 230, STEP = 16, MAX_HEARTS = 5;
 
@@ -202,6 +207,13 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
       checkpoints: [60, 600, 900, 1455, 1680, 2090],
       spikes: [],
       doors: [{ x: 900, to: 'bonus2' }]
+    },
+    5: {
+      name: 'Boss 2', width: 1500, start: 80, gun: true,
+      ground: [[0,362],[600,360],[1100,362],[1500,360]],
+      boss: { x: 950, min: 420, max: 1310, kind: 'bomb', hp: 3 },
+      cage: { x: 1370, chain: true },
+      ladders: [], stars: [], enemies: [], lava: [], spikes: [], doors: []
     },
     bonus2: {
       name: 'Bonus-Raum', width: 900, start: 40, bonus: true,
@@ -289,6 +301,8 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
   const sBossHit = () => { tone(180, .2, 'sawtooth', .1, -80); tone(120, .3, 'square', .06, -60, .05); };
   const sPing = () => tone(2000, .05, 'triangle', .04);
   const sStompBig = () => { tone(70, .35, 'square', .1, -30); };
+  const sBoom = () => { tone(90, .45, 'sawtooth', .12, -60); tone(60, .5, 'square', .08, -30, .03); };
+  const sCatch = () => tone(500, .1, 'triangle', .09, 300);
   const sKey = () => [784, 988, 1175, 1568].forEach((f, i) => tone(f, .12, 'triangle', .09, 0, i * .07));
   const sWin = () => [523, 659, 784, 1047].forEach((f, i) => tone(f, .2, 'triangle', .1, 0, i * .12));
 
@@ -315,7 +329,10 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
       doorsUsed: def.doors.map(() => false),
       outlines: buildOutline(def), sawY: (def.saws || []).map(w => w.y0),
       pshots: [], balls: [], key: null, hasKey: false, cageOpen: false, friendT: 0, shake: 0,
-      boss: def.boss ? { x: def.boss.x, y: 0, w: 84, h: 150, vx: 0, vy: 0, hp: 4, inv: 0, t: 2.2, mode: 'walk', face: -1,
+      bombs: [],
+      boss: def.boss ? { x: def.boss.x, y: 0, w: def.boss.kind === 'bomb' ? 120 : 84, h: def.boss.kind === 'bomb' ? 140 : 150,
+                         kind: def.boss.kind || 'spike', hp: def.boss.hp || 4, maxHp: def.boss.hp || 4, shieldOff: 0, hop: 0,
+                         vx: 0, vy: 0, inv: 0, t: 2.2, mode: 'walk', face: -1,
                          onGround: true, dead: 0, alive: true, roar: 0, min: def.boss.min, max: def.boss.max } : null
     };
   }
@@ -333,6 +350,7 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
     fx = []; hearts = 3; time = 0; cam = 0; bonusCount = 0;
     banner = { text: LEVELS[id].name + (LEVELS[id].boss ? '!' : ''), t: 2 };
     document.getElementById('bF').hidden = !LEVELS[id].gun;
+    releaseInput(); document.getElementById('pad').hidden = false;
     state = 'play';
     document.getElementById('start').hidden = true;
     document.getElementById('end').hidden = true;
@@ -355,11 +373,27 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
     placePlayer(x); p.inv = 1.6; p.freeze = .7;
   }
 
+  // Knöpfe reagieren auf Klick UND Touch (iPad-Safari verschluckt sonst manchmal den Klick)
+  let touchAt = -1e9;
+  function tapBtn(el, fn) {
+    // Touch: sofort auslösen und den nachgeschobenen "Geister-Klick" verhindern
+    let last = -1e9;
+    el.addEventListener('touchend', e => {
+      e.preventDefault(); const now = performance.now();
+      touchAt = now; if (now - last < 350) return; last = now; fn();
+    });
+    el.addEventListener('click', () => { if (performance.now() - touchAt < 700) return; fn(); });
+  }
+  function releaseInput() {
+    input.left = input.right = input.up = input.down = input.jumpHeld = false; input.jumpBuf = 0; input.fireBuf = 0;
+    document.querySelectorAll('#pad button').forEach(b => b.classList.remove('on'));
+  }
   function end(won) {
     state = 'end';
+    releaseInput(); document.getElementById('pad').hidden = true;
     const t = document.getElementById('endTitle'), txt = document.getElementById('endText'), btns = document.getElementById('endBtns');
     btns.innerHTML = '';
-    const add = (label, fn, alt) => { const b = document.createElement('button'); b.className = 'go' + (alt ? ' alt' : ''); b.textContent = label; b.addEventListener('click', fn); btns.appendChild(b); };
+    const add = (label, fn, alt) => { const b = document.createElement('button'); b.className = 'go' + (alt ? ' alt' : ''); b.textContent = label; tapBtn(b, fn); btns.appendChild(b); };
     const total = mainWorld.stars.length;
     if (won) {
       const next = LEVELS[levelId + 1];
@@ -381,6 +415,7 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
   }
   function menu() {
     state = 'start';
+    releaseInput(); document.getElementById('pad').hidden = true;
     document.getElementById('end').hidden = true;
     document.getElementById('start').hidden = false;
   }
@@ -578,7 +613,13 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
     if (def.gun) {
       if (p.fireCd > 0) p.fireCd -= dt;
       if (input.fireBuf > 0) input.fireBuf -= dt;
-      if (input.fireBuf > 0 && p.fireCd <= 0 && p.freeze <= 0) {
+      const held = world.bombs.find(o => o.state === 'held');
+      if (held && input.fireBuf > 0 && p.freeze <= 0) {
+        input.fireBuf = 0; p.fireCd = .35;
+        const b = world.boss, tx = b ? b.x + b.w / 2 : held.x + p.dir * 300, ty = b ? b.y + b.h * .45 : held.y, T = .7;
+        held.state = 'thrown'; held.vx = (tx - held.x) / T; held.vy = (ty - held.y) / T - .5 * BG * T; held.fuse = Math.max(held.fuse, 1.2);
+        tone(350, .12, 'square', .06, 250);
+      } else if (input.fireBuf > 0 && p.fireCd <= 0 && p.freeze <= 0) {
         input.fireBuf = 0; p.fireCd = .3;
         world.pshots.push({ x: p.x + p.w / 2 + p.dir * 22, y: p.y + 23, vx: p.dir * 560, t: 0 });
         sPew();
@@ -608,6 +649,74 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
     if (world.shake > 0) world.shake -= dt;
   }
 
+  const BG = 1000;
+  function explode(o) {
+    o.state = 'boom'; o.t = 0; sBoom(); world.shake = .25;
+    for (let k = 0; k < 18; k++) {
+      const a = Math.random() * 6.28, sp = 90 + Math.random() * 200;
+      fx.push({ x: o.x, y: o.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, c: k % 2 ? C.lava : C.graphite, t: 0 });
+    }
+  }
+  function bombBoss(dt, b) {
+    const def = world.def;
+    if (b.inv > 0) b.inv -= dt;
+    if (b.roar > 0) b.roar -= dt;
+    const pcx = p.x + p.w / 2, bcx = b.x + b.w / 2;
+    if (b.shieldOff > 0) {
+      b.shieldOff -= dt; b.vx = 0;
+      if (b.shieldOff <= 0) { b.t = 1.4; tone(500, .25, 'triangle', .07, 300); banner = { text: 'Schild ist wieder da!', t: 1.2 }; }
+    } else {
+      b.face = pcx < bcx ? -1 : 1;
+      const d = Math.abs(pcx - bcx);
+      b.vx = d > 320 ? b.face * 55 : d < 190 ? -b.face * 45 : 0;
+      b.t -= dt;
+      if (b.t <= 0) {
+        const n = b.hp === 1 ? 2 : 1;
+        for (let k = 0; k < n; k++) {
+          const hx = bcx + b.face * 62, hy = b.y + 22;
+          const tx = Math.max(30, Math.min(def.width - 30, pcx + (k ? -b.face * 110 : 0) + (Math.random() - .5) * 70));
+          const ty = G(tx) - 10, T = 1.0 + k * .2;
+          world.bombs.push({ x: hx, y: hy, vx: (tx - hx) / T, vy: (ty - hy) / T - .5 * BG * T, fuse: 2.9, state: 'fly', t: 0 });
+        }
+        b.roar = .5; tone(200, .15, 'square', .06, 150);
+        b.t = (b.hp < b.maxHp ? 2.1 : 2.7) + Math.random() * .6;
+      }
+    }
+    b.hop += dt * (b.vx ? 7 : 0);
+    b.x = Math.max(b.min, Math.min(b.max - b.w, b.x + b.vx * dt));
+    b.y = G(b.x + b.w / 2) - b.h - (b.vx ? Math.abs(Math.sin(b.hop)) * 10 : 0);
+    if (overlap(p, { x: b.x + 18, y: b.y + 24, w: b.w - 36, h: b.h - 24 })) { hurt(bcx); if (state !== 'play') return 'stop'; }
+
+    for (let i = world.bombs.length - 1; i >= 0; i--) {
+      const o = world.bombs[i];
+      o.t += dt;
+      if (o.state === 'boom') { if (o.t > .45) world.bombs.splice(i, 1); continue; }
+      o.fuse -= dt;
+      if (o.state === 'held') { o.x = p.x + p.w / 2; o.y = p.y - 12; }
+      else if (o.state === 'fly' || o.state === 'thrown') {
+        o.vy += BG * dt; o.x += o.vx * dt; o.y += o.vy * dt;
+        if (o.state === 'thrown' && overlap({ x: o.x - 10, y: o.y - 10, w: 20, h: 20 }, { x: b.x + 4, y: b.y, w: b.w - 8, h: b.h })) {
+          explode(o); b.shieldOff = 5; b.vx = 0; b.roar = .8;
+          banner = { text: 'Schild kaputt! Schieß!', t: 1.5 };
+          continue;
+        }
+        const gy = G(o.x);
+        if (o.y + 10 >= gy) { o.y = gy - 10; o.vx = 0; o.vy = 0; o.state = 'ground'; }
+        o.x = Math.max(10, Math.min(def.width - 10, o.x));
+      }
+      if ((o.state === 'fly' || o.state === 'ground') && !world.bombs.some(q => q.state === 'held') &&
+          overlap(p, { x: o.x - 15, y: o.y - 15, w: 30, h: 30 })) {
+        o.state = 'held'; o.fuse = Math.max(o.fuse, 1.7); sCatch();
+      }
+      if (o.fuse <= 0) {
+        const wasHeld = o.state === 'held';
+        explode(o);
+        const dx = (p.x + p.w / 2) - o.x, dy = (p.y + p.h / 2) - o.y;
+        if (wasHeld || Math.hypot(dx, dy) < 62) { hurt(o.x); if (state !== 'play') return 'stop'; }
+      }
+    }
+  }
+
   function updateBoss(dt) {
     const def = world.def, b = world.boss;
     // Schüsse des Spielers
@@ -617,14 +726,19 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
       if (s.t > 1.4) { world.pshots.splice(i, 1); continue; }
       if (b && b.alive && !b.dead && overlap({ x: s.x - 5, y: s.y - 3, w: 10, h: 6 }, { x: b.x + 10, y: b.y + 10, w: b.w - 20, h: b.h - 10 })) {
         world.pshots.splice(i, 1);
+        if (b.kind === 'bomb' && b.shieldOff <= 0) {
+          sPing();
+          for (let k = 0; k < 4; k++) fx.push({ x: s.x, y: s.y, vx: -Math.sign(s.vx) * (60 + Math.random() * 80), vy: (Math.random() - .5) * 120, c: C.blue, t: 0 });
+          continue;
+        }
         if (b.inv > 0) { sPing(); continue; }
-        b.hp--; b.inv = 1.2; sBossHit();
+        b.hp--; b.inv = b.kind === 'bomb' ? 2.6 : 1.2; sBossHit();
         for (let k = 0; k < 12; k++) {
           const a = Math.random() * 6.28, sp = 80 + Math.random() * 160;
           fx.push({ x: s.x, y: s.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, c: C.red, t: 0 });
         }
         if (b.hp <= 0) {
-          b.dead = 1.6; b.vx = 0; world.balls = [];
+          b.dead = 1.6; b.vx = 0; world.balls = []; world.bombs = []; b.shieldOff = 0;
           banner = { text: 'BLÄÄRGH!', t: 1.6 };
           world.key = { x: b.x + b.w / 2, y: b.y + 40, vx: -170, vy: -520, onGround: false };
           tone(300, .6, 'sawtooth', .1, -250);
@@ -637,6 +751,8 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
     if (b.alive) {
       if (b.dead > 0) {
         b.dead -= dt; if (b.dead <= 0) b.alive = false;
+      } else if (b.kind === 'bomb') {
+        if (bombBoss(dt, b) === 'stop') return 'stop';
       } else {
         if (b.inv > 0) b.inv -= dt;
         if (b.roar > 0) b.roar -= dt;
@@ -831,6 +947,100 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
     ctx.restore();
   }
 
+  function drawBomb(o) {
+    ctx.save();
+    if (o.state === 'boom') {
+      const r = 14 + o.t * 140;
+      ctx.globalAlpha = Math.max(0, 1 - o.t / .45);
+      ctx.beginPath();
+      for (let k = 0; k < 16; k++) { const a = k * Math.PI / 8, rr = k % 2 ? r * .6 : r; ctx.lineTo(o.x + Math.cos(a) * rr, o.y + Math.sin(a) * rr); }
+      ctx.closePath(); ctx.fillStyle = 'rgba(242,140,40,.55)'; ctx.fill(); pencil(C.lavaDark, 3); ctx.stroke();
+      ctx.restore(); return;
+    }
+    const blink = o.fuse < 1 && Math.floor(o.fuse * 10) % 2 === 0;
+    ctx.translate(o.x, o.y); if (o.state !== 'held') ctx.rotate(o.t * (o.state === 'ground' ? 0 : 6));
+    ctx.beginPath(); ctx.arc(0, 0, 10, 0, 6.29);
+    ctx.fillStyle = blink ? 'rgba(217,58,58,.6)' : 'rgba(94,95,99,.75)'; ctx.fill(); pencil(C.graphite, 2.5); ctx.stroke();
+    pencil(C.graphite, 2); ctx.beginPath(); ctx.moveTo(4, -8); ctx.quadraticCurveTo(10, -16, 6, -20); ctx.stroke();
+    ctx.fillStyle = Math.floor(time * 20) % 2 ? C.yellow : C.lava;
+    ctx.beginPath(); ctx.arc(6, -21, 3, 0, 6.29); ctx.fill();
+    ctx.restore();
+    if (o.state === 'held') {
+      ctx.fillStyle = C.green; ctx.font = '20px ' + HAND; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('✹ werfen!', o.x, o.y - 30 + Math.sin(time * 8) * 2);
+    }
+  }
+
+  function drawBombBoss(b) {
+    if (b.inv > 1.6 && !b.dead && Math.floor(b.inv * 14) % 2 === 0) return;
+    const cx = b.x + b.w / 2, bot = b.y + b.h, f = b.face;
+    ctx.save();
+    if (b.dead > 0) {
+      const k = 1 - b.dead / 1.6;
+      ctx.globalAlpha = Math.max(0, 1 - k * 1.1);
+      ctx.translate(cx, bot); ctx.rotate(k * 1.4 * -f); ctx.translate(-cx, -bot);
+    }
+    pencil(C.red, 3);
+    // dickes Bein
+    ctx.beginPath(); ctx.rect(cx - 15, bot - 34, 30, 34); ctx.fillStyle = C.paper; ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx - 22, bot); ctx.lineTo(cx + 22, bot); ctx.stroke();
+    // Klops-Körper
+    const cy = bot - 34 - 50;
+    ctx.beginPath();
+    for (let k = 0; k <= 28; k++) {
+      const a = k / 28 * 6.283, wob = 1 + Math.sin(a * 5 + 1) * .06 + Math.sin(a * 3) * .04;
+      const x = cx + Math.cos(a) * 54 * wob, y = cy + Math.sin(a) * 50 * wob;
+      k ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.closePath(); ctx.fillStyle = 'rgba(217,58,58,.07)'; ctx.fill(); ctx.stroke();
+    // Arme: vorne Krallenhand (wirft), hinten Hand
+    const up = b.roar > 0 ? -18 : 0;
+    ctx.beginPath(); ctx.moveTo(cx + f * 46, cy - 14); ctx.quadraticCurveTo(cx + f * 64, cy - 26 + up, cx + f * 66, cy - 44 + up); ctx.stroke();
+    ctx.beginPath();
+    for (let k = -1; k <= 1; k++) { ctx.moveTo(cx + f * 66, cy - 44 + up); ctx.lineTo(cx + f * (68 + k * 7), cy - 60 + up - Math.abs(k) * -4); }
+    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx - f * 48, cy + 12); ctx.quadraticCurveTo(cx - f * 64, cy + 22, cx - f * 62, cy + 38); ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx - f * 62, cy + 42, 6, 0, 6.29); ctx.stroke();
+    ctx.beginPath();
+    for (let k = 0; k < 4; k++) { ctx.moveTo(cx - f * (58 + k * 3), cy + 46); ctx.lineTo(cx - f * (56 + k * 5), cy + 55); }
+    ctx.stroke();
+    // Gesicht
+    const dazed = b.shieldOff > 0;
+    for (const s of [-1, 1]) {
+      const ex = cx + f * 12 + s * 14, ey = cy - 14;
+      ctx.beginPath(); ctx.arc(ex, ey, 8, 0, 6.29); ctx.fillStyle = C.paper; ctx.fill(); ctx.stroke();
+      if (dazed) { ctx.beginPath(); ctx.moveTo(ex - 4, ey - 4); ctx.lineTo(ex + 4, ey + 4); ctx.moveTo(ex + 4, ey - 4); ctx.lineTo(ex - 4, ey + 4); ctx.stroke(); }
+      else { ctx.fillStyle = C.red; ctx.beginPath(); ctx.arc(ex + f * 3, ey + 1, 3, 0, 6.29); ctx.fill(); }
+      ctx.beginPath(); ctx.moveTo(ex - s * 9, ey - 16); ctx.lineTo(ex + s * 7, ey - 10); ctx.stroke();
+    }
+    ctx.beginPath();
+    if (b.roar > 0) ctx.ellipse(cx + f * 12, cy + 14, 10, 7, 0, 0, 6.29);
+    else ctx.arc(cx + f * 12, cy + 22, 12, 1.15 * Math.PI, 1.85 * Math.PI);
+    ctx.stroke();
+    if (dazed) {
+      for (let k = 0; k < 3; k++) {
+        const a = time * 4 + k * 2.09;
+        pencil(C.yellow, 2); starPath(cx + Math.cos(a) * 34, cy - 62 + Math.sin(a) * 8, 7); ctx.stroke();
+      }
+    }
+    ctx.restore();
+    // Schutzschild
+    if (b.alive && !b.dead) {
+      if (b.shieldOff <= 0) {
+        ctx.save();
+        ctx.globalAlpha = .9;
+        ctx.beginPath(); ctx.ellipse(cx, b.y + b.h / 2 - 4, 82, 84, 0, 0, 6.29);
+        ctx.fillStyle = 'rgba(74,144,200,.12)'; ctx.fill();
+        pencil(C.blue, 3); ctx.setLineDash([14, 6]); ctx.lineDashOffset = -time * 30; ctx.stroke();
+        ctx.restore();
+      } else {
+        const w = 90 * Math.min(1, b.shieldOff / 5);
+        pencil(C.grey, 2); ctx.strokeRect(cx - 45, b.y - 30, 90, 8);
+        ctx.fillStyle = C.blue; ctx.fillRect(cx - 45, b.y - 30, w, 8);
+      }
+    }
+  }
+
   function drawKey(x, y, rot) {
     ctx.save(); ctx.translate(x, y); ctx.rotate(rot || 0);
     pencil(C.yellow, 3);
@@ -842,6 +1052,10 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
   function drawCage() {
     const def = world.def; if (!def.cage) return;
     const x = def.cage.x, gy = G(x + 45), y = gy - 110;
+    if (def.cage.chain && !world.cageOpen) {
+      pencil(C.graphite, 2);
+      for (let k = 0; k < 4; k++) { ctx.beginPath(); ctx.ellipse(x + 96 + k * 11, gy - 8, 6, 4, 0, 0, 6.29); ctx.stroke(); }
+    }
     // Kumpel
     const ft = world.friendT, jump = world.cageOpen ? Math.abs(Math.sin(ft * 8)) * 26 : 0;
     const fx0 = world.cageOpen ? x + 45 - Math.min(ft, 1) * 30 : x + 45;
@@ -1108,7 +1322,8 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
     // Boss: Herzen + böses Gesicht rechts
     const b = world.boss;
     if (b) {
-      for (let i = 0; i < 4; i++) {
+      const nH = b.maxHp || 4;
+      for (let i = 0; i < nH; i++) {
         heartPath(W - 70 - i * 34, 16, 26);
         if (i < b.hp) { ctx.fillStyle = 'rgba(217,58,58,.25)'; ctx.fill(); pencil(C.red, 2.5); } else pencil(C.grey, 2);
         ctx.stroke();
@@ -1118,7 +1333,11 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
       ctx.beginPath(); ctx.moveTo(W - 36, 23); ctx.lineTo(W - 30, 27); ctx.moveTo(W - 20, 23); ctx.lineTo(W - 26, 27); ctx.stroke();
       ctx.beginPath(); ctx.arc(W - 28, 39, 6, 1.15 * Math.PI, 1.85 * Math.PI); ctx.stroke();
       ctx.fillStyle = C.red; ctx.font = '18px ' + HAND; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText('BOSS', W - 121, 56);
+      ctx.fillText('BOSS', W - 70 - (nH - 1) * 17, 56);
+      if (b.kind === 'bomb' && b.alive && !b.dead && time > 2 && time < 10) {
+        ctx.fillStyle = C.green; ctx.font = '24px ' + HAND; ctx.textAlign = 'center';
+        ctx.fillText('Fang eine Bombe und wirf sie mit ✹ (X) zurück!', W / 2, 150);
+      }
     }
   }
 
@@ -1195,7 +1414,8 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
 
     for (const e of world.enemies) if (e.alive) drawEnemy(e);
     drawCage();
-    if (world.boss && world.boss.alive) drawBoss(world.boss);
+    if (world.boss && world.boss.alive) (world.boss.kind === 'bomb' ? drawBombBoss : drawBoss)(world.boss);
+    for (const o of world.bombs) drawBomb(o);
     for (const o of world.balls) {
       ctx.save(); ctx.translate(o.x, o.y); ctx.rotate(o.t * 8);
       pencil(C.red, 2.5); ctx.beginPath();
@@ -1256,10 +1476,7 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
     requestAnimationFrame(loop);
   }
 
-  document.getElementById('lv1').addEventListener('click', () => startLevel(1));
-  document.getElementById('lv2').addEventListener('click', () => startLevel(2));
-  document.getElementById('lv3').addEventListener('click', () => startLevel(3));
-  document.getElementById('lv4').addEventListener('click', () => startLevel(4));
+  [1, 2, 3, 4, 5].forEach(n => tapBtn(document.getElementById('lv' + n), () => startLevel(n)));
 
   // ================= Eingabe =================
   const KEY = { ArrowLeft: 'left', a: 'left', A: 'left', ArrowRight: 'right', d: 'right', D: 'right', ArrowUp: 'up', w: 'up', W: 'up', ArrowDown: 'down', s: 'down', S: 'down' };
@@ -1314,7 +1531,6 @@ button:focus-visible { outline: 3px dashed var(--yellow); outline-offset: 4px; }
 <script>
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 document.addEventListener('gesturestart', e => e.preventDefault());
-document.addEventListener('dblclick', e => e.preventDefault());
 </script>
 </body>
 </html>

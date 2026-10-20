@@ -8,6 +8,7 @@ Ein Jump'n'Run im Strichmännchen-Look. Die Level hat ein 8-Jähriger gezeichnet
 - Level 2: Berg, Lava, Leiter, Sterntür zum Bonusraum, Po-Monster, Pistolen-Mann
 - Level 3: Boss-Kampf, Kumpel aus dem Käfig befreien
 - Level 4: Leiter, Säge, Abgrund, Sterntür zum Bonusraum, Dino, Stachel-Loch, Stachelmonster, Lava
+- Boss 2: Klops-Boss mit Schutzschild und Bomben. Bombe fangen, mit ✹ (X) zurückwerfen, dann ist der Schild 5 Sekunden weg
 
-Steuerung: ← → laufen, Leertaste springen, ↑ ↓ Leiter/Tür, X schießen. Auf dem iPad gibt es Touch-Knöpfe.
+Steuerung: ← → laufen, Leertaste springen, ↑ ↓ Leiter/Tür, X schießen/werfen. Auf dem iPad gibt es Touch-Knöpfe.
 Auf dem iPad in Safari öffnen → Teilen → „Zum Home-Bildschirm“, dann läuft es im Vollbild und offline.
